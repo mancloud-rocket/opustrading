@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Cache
+python/cache/
+
+# Data (large CSVs - keep structure, ignore large files)
+data/live_log.csv
+data/prices.csv
+data/trades.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (legacy, already removed)
+node_modules/
+package-lock.json
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local

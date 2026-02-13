@@ -1,17 +1,20 @@
 """
-Motor de trading: signal engine + paper trading + risk management.
+Motor de trading: ML predictor + paper trading + risk management.
 
-Implementa la estrategia "Cheap Token + BTC Reversal Stop":
-  - Entry: BTC momentum > threshold + token barato (0.25-0.50)
-  - Exit: BTC reversal o resolucion del mercado
-  - Hold to resolution cuando la señal se mantiene
+Estrategia v3.2 - ML Predictive (GradientBoosting):
+  - Modelo GBM con ponderacion automatica de features
+  - Solo features BTC (sin leakage de Polymarket)
+  - Prediccion CONTINUA: se ejecuta en cada tick/iteracion
+  - Entry: P > 0.65 con BTC threshold 0.08% como hard filter
+  - Exit: Take profit ($0.97), Stop Loss (50%), o resolucion
+  - Fallback a threshold si modelo no esta disponible
 """
 
 import time
 import csv
 import os
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass, field
 
 from live.polymarket_client import MarketInfo, PriceSnapshot
@@ -20,6 +23,13 @@ from live.settings import get_strategy_config
 
 # Cargar configuracion desde settings.py
 STRATEGY_CONFIG = get_strategy_config()
+
+# Intentar cargar predictor ML
+try:
+    from ml.predictor import MarketPredictor
+    _ML_AVAILABLE = True
+except ImportError:
+    _ML_AVAILABLE = False
 
 
 # ============================================================================
@@ -111,9 +121,21 @@ class Trader:
         self.entries_this_market: int = 0
         self.trade_history: List[TradeRecord] = []
 
+        # Tick history for ML features (reset per market)
+        self._btc_ticks: List[Tuple[float, float]] = []   # (elapsed_s, btc_price)
+        self._poly_ticks: List[Tuple[float, float, float]] = []  # (elapsed_s, up, down)
+
         # Signal processor avanzado
         self.signals = SignalProcessor(window_size=30)
         self.last_signal_state: Optional[SignalState] = None
+
+        # ML Predictor (prediccion continua cada tick)
+        self.predictor: Optional[MarketPredictor] = None
+        self._load_predictor()
+
+        # Prediccion actual (actualizada cada tick)
+        self.last_prediction = None  # PredictionResult o None
+        self._prediction_history: List = []  # historial de predicciones del mercado
 
         # Stats
         self.daily_stats = DailyStats(
@@ -123,6 +145,26 @@ class Trader:
 
         # Init files
         self._init_files()
+
+    def _load_predictor(self):
+        """Intenta cargar el modelo ML entrenado."""
+        if not _ML_AVAILABLE:
+            return
+
+        model_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "ml", "model.pkl"
+        )
+        self.predictor = MarketPredictor()
+        if self.predictor.load(model_path):
+            stats = self.predictor.training_stats
+            auc = stats.get("cv_auc", 0)
+            n = stats.get("n_markets", 0)
+            print(f"  ML Model cargado: AUC={auc:.3f}, "
+                  f"entrenado con {n} mercados")
+        else:
+            print("  ML Model no encontrado. Usando fallback (thresholds).")
+            print("  Para entrenar: python train_model.py")
+            self.predictor = None
 
     # ------------------------------------------------------------------
     # File I/O
@@ -150,7 +192,7 @@ class Trader:
                     "timestamp", "market", "elapsed_s",
                     "up_price", "down_price", "btc_price",
                     "btc_return", "signal", "position",
-                    "event",
+                    "event", "ml_p_up", "ml_confidence",
                 ])
 
     def _write_trade(self, trade: TradeRecord):
@@ -177,9 +219,16 @@ class Trader:
         signal: str,
         event: str,
     ):
-        """Escribe una linea de log."""
+        """Escribe una linea de log (incluye prediccion ML)."""
         now = datetime.now(timezone.utc).isoformat()
         elapsed = market.elapsed_seconds if market else 0
+
+        # ML prediction info (si disponible)
+        ml_p_up = ""
+        ml_conf = ""
+        if self.last_prediction is not None:
+            ml_p_up = f"{self.last_prediction.p_up:.4f}"
+            ml_conf = f"{self.last_prediction.confidence:.4f}"
 
         with open(self.log_file, "a", newline="") as f:
             writer = csv.writer(f)
@@ -194,6 +243,8 @@ class Trader:
                 signal,
                 self.position.side if self.position else "NONE",
                 event,
+                ml_p_up,
+                ml_conf,
             ])
 
     # ------------------------------------------------------------------
@@ -206,9 +257,15 @@ class Trader:
         self.btc_at_market_start = btc_price
         self.entries_this_market = 0
 
-        # Reset signal processor para nuevo mercado
+        # Reset tick history para ML features
+        self._btc_ticks = []
+        self._poly_ticks = []
+
+        # Reset signal processor y predicciones para nuevo mercado
         self.signals.reset(btc_price)
         self.last_signal_state = None
+        self.last_prediction = None
+        self._prediction_history = []
 
         # Check daily stats reset
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -269,6 +326,30 @@ class Trader:
         event = "WAIT"
         signal = "NONE"
 
+        # Collect tick data for ML features
+        if btc_price is not None:
+            self._btc_ticks.append((elapsed, btc_price))
+        if prices.up is not None and prices.down is not None:
+            self._poly_ticks.append((elapsed, prices.up, prices.down))
+
+        # === PREDICCION CONTINUA (cada tick) ===
+        if self.predictor and self.predictor.is_trained:
+            features = self.predictor.compute_live_features(
+                btc_ticks=self._btc_ticks,
+                poly_ticks=self._poly_ticks,
+                btc_start=self.btc_at_market_start or 0,
+                elapsed=elapsed,
+            )
+            if features is not None:
+                self.last_prediction = self.predictor.predict(features)
+                if self.last_prediction is not None:
+                    self._prediction_history.append({
+                        "elapsed": elapsed,
+                        "p_up": self.last_prediction.p_up,
+                        "confidence": self.last_prediction.confidence,
+                        "side": self.last_prediction.predicted_side,
+                    })
+
         # === CHECK EXITS FIRST ===
         if self.position is not None:
             exit_event = self._check_exit(
@@ -322,7 +403,12 @@ class Trader:
         btc_return: Optional[float],
         elapsed: float,
     ) -> Optional[str]:
-        """Verifica si debemos entrar. Retorna 'ENTRY_UP', 'ENTRY_DOWN' o None."""
+        """
+        Verifica si debemos entrar.
+
+        Usa ML predictor si esta disponible, fallback a thresholds.
+        Retorna 'ENTRY_UP', 'ENTRY_DOWN' o None.
+        """
         cfg = STRATEGY_CONFIG
 
         # Risk check
@@ -337,14 +423,120 @@ class Trader:
         if elapsed < cfg["entry_second_min"] or elapsed > cfg["entry_second_max"]:
             return None
 
-        # BTC signal required
+        # BTC signal required (minimo basico)
         if btc_return is None:
             return None
 
-        # BTC subiendo -> comprar UP si esta barato
-        if btc_return > cfg["btc_threshold"]:
+        # ====== ML PREDICTION ======
+        if self.predictor is not None and self.predictor.is_trained:
+            return self._check_entry_ml(
+                market, prices, btc_price, btc_return, elapsed
+            )
+
+        # ====== FALLBACK: Threshold-based ======
+        return self._check_entry_threshold(
+            market, prices, btc_price, btc_return, elapsed
+        )
+
+    def _check_entry_ml(
+        self,
+        market: MarketInfo,
+        prices: PriceSnapshot,
+        btc_price: Optional[float],
+        btc_return: Optional[float],
+        elapsed: float,
+    ) -> Optional[str]:
+        """
+        Entry decision basada en ML predictor.
+        Usa self.last_prediction (actualizado cada tick) en vez de recomputar.
+        """
+        cfg = STRATEGY_CONFIG
+
+        # HARD FILTER: BTC threshold minimo (independiente del ML).
+        # Sin esto, el ML entra en senales de 0.05% que luego reversan.
+        if btc_return is None or abs(btc_return) < cfg["btc_threshold"]:
+            return None
+
+        # Usar prediccion continua (ya calculada en process_tick)
+        result = self.last_prediction
+        if result is None:
+            return None
+
+        # Minimum confidence for entry
+        min_confidence = cfg.get("ml_min_confidence", 0.58)
+        if result.confidence < min_confidence:
+            return None
+
+        # Estabilidad: verificar que la prediccion es consistente
+        # (al menos 3 ticks consecutivos prediciendo el mismo lado)
+        if len(self._prediction_history) >= 3:
+            recent = self._prediction_history[-3:]
+            sides = [p["side"] for p in recent]
+            if len(set(sides)) > 1:
+                return None  # Prediccion inestable, no entrar
+
+        # Max entry price desde settings
+        is_strong = abs(btc_return) >= cfg.get("strong_signal_threshold", 0.0015)
+        max_price = cfg.get("entry_price_max_strong", 0.65) if is_strong else cfg["entry_price_max"]
+        min_price = cfg["entry_price_min"]
+
+        # Select side and check price
+        if result.predicted_side == "UP":
             price = prices.up
-            if price is not None and cfg["entry_price_min"] <= price <= cfg["entry_price_max"]:
+            if price is not None and min_price <= price <= max_price:
+                self._open_position(
+                    side="UP",
+                    entry_price=price,
+                    entry_second=elapsed,
+                    btc_price=btc_price or 0.0,
+                    btc_return=btc_return,
+                    market=market,
+                    ml_confidence=result.confidence,
+                    ml_p_up=result.p_up,
+                )
+                return "ENTRY_UP"
+
+        elif result.predicted_side == "DOWN":
+            price = prices.down
+            if price is not None and min_price <= price <= max_price:
+                self._open_position(
+                    side="DOWN",
+                    entry_price=price,
+                    entry_second=elapsed,
+                    btc_price=btc_price or 0.0,
+                    btc_return=btc_return,
+                    market=market,
+                    ml_confidence=result.confidence,
+                    ml_p_up=result.p_up,
+                )
+                return "ENTRY_DOWN"
+
+        return None
+
+    def _check_entry_threshold(
+        self,
+        market: MarketInfo,
+        prices: PriceSnapshot,
+        btc_price: Optional[float],
+        btc_return: Optional[float],
+        elapsed: float,
+    ) -> Optional[str]:
+        """Fallback: entry basada en thresholds fijos (sin ML)."""
+        cfg = STRATEGY_CONFIG
+        abs_ret = abs(btc_return)
+
+        if abs_ret < cfg["btc_threshold"]:
+            return None
+
+        # Tiered entry: strong signal allows higher entry prices
+        is_strong = abs_ret >= cfg.get("strong_signal_threshold", 0.001)
+        max_price = cfg.get("entry_price_max_strong", 0.65) if is_strong else cfg["entry_price_max"]
+        min_price = cfg["entry_price_min"]
+
+        # BTC subiendo -> comprar UP
+        if btc_return > 0:
+            price = prices.up
+            if price is not None and min_price <= price <= max_price:
                 self._open_position(
                     side="UP",
                     entry_price=price,
@@ -355,10 +547,10 @@ class Trader:
                 )
                 return "ENTRY_UP"
 
-        # BTC bajando -> comprar DOWN si esta barato
-        if btc_return < -cfg["btc_threshold"]:
+        # BTC bajando -> comprar DOWN
+        if btc_return < 0:
             price = prices.down
-            if price is not None and cfg["entry_price_min"] <= price <= cfg["entry_price_max"]:
+            if price is not None and min_price <= price <= max_price:
                 self._open_position(
                     side="DOWN",
                     entry_price=price,
@@ -435,10 +627,23 @@ class Trader:
             )
             return "EXIT_TAKE_PROFIT"
 
-        # SL y BTC reversal desactivados.
-        # Los tokens tienen volatilidad muy alta intra-mercado:
-        # pueden caer 40%+ y luego resolver a favor.
-        # Solo TP a $0.97 + resolution.
+        # Token Stop Loss: si el token cae X% desde entry, cerrar.
+        # VALIDACION (85 trades reales):
+        #   Sin SL: 19 trades (22%) fueron a $0.00 = -$394 total
+        #   SL 50%: esos trades pierden ~$10.80 cada uno = +$190 de mejora
+        sl_pct = cfg.get("token_stop_loss_pct")
+        if sl_pct and current_token is not None and self.position.entry_price > 0:
+            sl_price = self.position.entry_price * (1 - sl_pct)
+            if current_token <= sl_price:
+                self._close_position(
+                    exit_price=current_token,
+                    exit_second=elapsed,
+                    reason="TOKEN_STOP_LOSS",
+                    btc_at_exit=btc_price or 0.0,
+                    btc_ret_at_exit=btc_return,
+                    market=market,
+                )
+                return "EXIT_TOKEN_STOP_LOSS"
 
         return None
 
@@ -454,6 +659,8 @@ class Trader:
         btc_price: float,
         btc_return: float,
         market: MarketInfo,
+        ml_confidence: Optional[float] = None,
+        ml_p_up: Optional[float] = None,
     ):
         """Abre una posicion (paper)."""
         self.position = Position(
@@ -468,6 +675,12 @@ class Trader:
         )
         self.entries_this_market += 1
         self.daily_stats.markets_traded += 1
+
+        # Log ML info
+        if ml_confidence is not None:
+            conf_str = f"{ml_confidence*100:.1f}%"
+            pup_str = f"{ml_p_up:.3f}" if ml_p_up is not None else "N/A"
+            print(f"  [ML] P(UP)={pup_str} Confidence={conf_str} -> {side}")
 
     def _close_position(
         self,
@@ -558,13 +771,20 @@ class Trader:
             sign = "+" if btc_return >= 0 else ""
             parts.append(f"ret:{sign}{btc_return*100:.3f}%")
 
-        # Z-score y calidad de señal
+        # ML prediction continua (actualizada cada tick)
+        if self.last_prediction is not None and not self.position:
+            result = self.last_prediction
+            parts.append(
+                f"ML:{result.predicted_side}"
+                f" P(UP):{result.p_up:.2f}"
+                f"[{result.confidence:.0%}]"
+            )
+
+        # Z-score y calidad de señal (fallback/complemento)
         if self.last_signal_state:
             ss = self.last_signal_state
             if ss.btc_zscore is not None:
                 parts.append(f"z:{ss.btc_zscore:+.2f}")
-            if ss.signal_quality != "NONE":
-                parts.append(f"[{ss.signal_quality}]")
 
         if self.position:
             current = prices.up if self.position.side == "UP" else prices.down

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OPUS Trading - ML Prediction Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1>OPUS Trading Bot - ML Prediction Dashboard</h1>
+      <div class="subtitle">GradientBoosting Model - BTC Features Only (No Polymarket Leakage)</div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat-pill">
+        <div class="value" id="stat-auc">--</div>
+        <div class="label">AUC (CV)</div>
+      </div>
+      <div class="stat-pill">
+        <div class="value" id="stat-acc">--</div>
+        <div class="label">Accuracy</div>
+      </div>
+      <div class="stat-pill">
+        <div class="value" id="stat-brier">--</div>
+        <div class="label">Brier Score</div>
+      </div>
+      <div class="stat-pill">
+        <div class="value" id="stat-markets">--</div>
+        <div class="label">Markets</div>
+      </div>
+      <div class="stat-pill">
+        <div class="value" id="stat-samples">--</div>
+        <div class="label">Samples</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard Grid -->
+  <div class="dashboard" id="app">
+
+    <!-- 0. LIVE Scatter: Real-time P(UP) from bot -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h2 style="margin:0"><span class="dot orange"></span> LIVE P(UP) - Predicciones Reales del Bot</h2>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <label for="liveMinuteSelect" style="color:#94a3b8;font-size:13px;">Minuto:</label>
+          <select id="liveMinuteSelect" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;">
+            <option value="2">Min 2</option>
+            <option value="3">Min 3</option>
+            <option value="4">Min 4</option>
+            <option value="5">Min 5</option>
+            <option value="6">Min 6</option>
+            <option value="7" selected>Min 7</option>
+            <option value="8">Min 8</option>
+            <option value="9">Min 9</option>
+            <option value="10">Min 10</option>
+            <option value="11">Min 11</option>
+            <option value="12">Min 12</option>
+          </select>
+          <span id="liveMinuteStats" style="color:#f97316;font-size:12px;margin-left:8px;font-weight:600;"></span>
+          <span style="color:#64748b;font-size:11px;margin-left:12px;">(Estas son las predicciones REALES que el bot hizo en vivo)</span>
+        </div>
+      </div>
+      <div class="chart-container tall">
+        <canvas id="liveScatterChart"></canvas>
+      </div>
+    </div>
+
+    <!-- 1. Model Scatter: P(UP) vs Actual (in-sample, retrained) -->
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h2 style="margin:0"><span class="dot green"></span> Model P(UP) vs Outcome <span style="color:#64748b;font-size:11px;">(in-sample)</span></h2>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <label for="minuteSelect" style="color:#94a3b8;font-size:13px;">Minuto:</label>
+          <select id="minuteSelect" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;">
+            <option value="2">Min 2</option>
+            <option value="3">Min 3</option>
+            <option value="4">Min 4</option>
+            <option value="5">Min 5</option>
+            <option value="6">Min 6</option>
+            <option value="7" selected>Min 7</option>
+            <option value="8">Min 8</option>
+            <option value="9">Min 9</option>
+            <option value="10">Min 10</option>
+            <option value="11">Min 11</option>
+            <option value="12">Min 12</option>
+          </select>
+          <span id="minuteStats" style="color:#64748b;font-size:12px;margin-left:8px;"></span>
+        </div>
+      </div>
+      <div class="chart-container tall">
+        <canvas id="scatterChart"></canvas>
+      </div>
+    </div>
+
+    <!-- 2. Calibration -->
+    <div class="card">
+      <h2><span class="dot blue"></span> Calibration Curve (predicted vs actual)</h2>
+      <div class="chart-container tall">
+        <canvas id="calibrationChart"></canvas>
+      </div>
+    </div>
+
+    <!-- 3. Distribution -->
+    <div class="card">
+      <h2><span class="dot purple"></span> P(UP) Distribution by Outcome</h2>
+      <div class="chart-container">
+        <canvas id="distributionChart"></canvas>
+      </div>
+    </div>
+
+    <!-- 4. PnL Curves -->
+    <div class="card">
+      <h2><span class="dot orange"></span> Cumulative PnL by Confidence Threshold</h2>
+      <div class="chart-container">
+        <canvas id="pnlChart"></canvas>
+      </div>
+    </div>
+
+    <!-- 5. Feature Importance -->
+    <div class="card">
+      <h2><span class="dot cyan"></span> Feature Weighting (GradientBoosting Importance)</h2>
+      <div class="feature-bars" id="featureBars"></div>
+    </div>
+
+    <!-- 6. Minute-by-Minute Accuracy -->
+    <div class="card">
+      <h2><span class="dot red"></span> Accuracy by Minute</h2>
+      <div class="minute-grid" id="minuteGrid"></div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    Data generated: <span id="footer-time">--</span> | OPUS Trading Bot v3.1
+  </div>
+
+  <script src="chart_data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
+

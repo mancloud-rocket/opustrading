@@ -79,21 +79,25 @@ def log(level: str, msg: str):
 
 def print_banner():
     cfg = STRATEGY_CONFIG
+    ml_status = "ML PREDICTOR" if cfg.get("use_ml_predictor") else "THRESHOLDS"
+    sl_pct = cfg.get("token_stop_loss_pct", 0)
+    sl_str = f"{sl_pct*100:.0f}% token drop" if sl_pct else "DESACTIVADO"
     print(f"""
 {C.GREEN}+======================================================================+
-|  OPUS Trading Bot v3.0 - Paper Trading                              |
-|  Estrategia: Cheap Token + BTC Momentum                             |
+|  OPUS Trading Bot v3.3 - Paper Trading                              |
+|  Estrategia: GradientBoosting + BTC Features (prediccion continua)  |
 +======================================================================+
 |                                                                      |
 |  ENTRY:                                                              |
-|    BTC return >= {cfg['btc_threshold']*100:.3f}% desde inicio del mercado            |
-|    Token price: ${cfg['entry_price_min']:.2f} - ${cfg['entry_price_max']:.2f}                                    |
+|    BTC threshold: >= {cfg['btc_threshold']*100:.3f}% (HARD filter, ML y fallback)|
+|    ML confidence: >= {cfg.get('ml_min_confidence', 0.58)*100:.0f}% (si modelo disponible)              |
+|    Token price: ${cfg['entry_price_min']:.2f} - ${cfg['entry_price_max']:.2f} (max ${cfg.get('entry_price_max_strong', 0.65):.2f} si BTC > 0.15%)   |
 |    Ventana: minuto {cfg['entry_second_min']//60}-{cfg['entry_second_max']//60}                                            |
 |                                                                      |
 |  EXIT:                                                               |
 |    Take profit: token >= ${cfg.get('take_profit_price', 0.97):.2f}                                |
+|    Stop loss: {sl_str:<45}|
 |    Resolution: hold hasta que el mercado resuelva                    |
-|    (SL y BTC reversal DESACTIVADOS)                                  |
 |                                                                      |
 |  RISK:                                                               |
 |    Bet size: ${cfg['bet_size']:.2f} | Fee: {cfg['fee_rate']*100:.0f}% por lado                          |

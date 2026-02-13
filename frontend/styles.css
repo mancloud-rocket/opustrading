@@ -1,0 +1,233 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0a0e17;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+.header {
+  background: linear-gradient(135deg, #0f1629 0%, #1a1f3a 100%);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 24px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.header .subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 24px;
+}
+
+.stat-pill {
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+  padding: 8px 16px;
+  text-align: center;
+}
+
+.stat-pill .value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #818cf8;
+}
+
+.stat-pill .label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dashboard {
+  padding: 24px 32px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.card {
+  background: #111827;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 20px;
+  transition: border-color 0.2s;
+}
+
+.card:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.card.full-width {
+  grid-column: 1 / -1;
+}
+
+.card h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card h2 .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot.green { background: #22c55e; }
+.dot.blue { background: #3b82f6; }
+.dot.purple { background: #a855f7; }
+.dot.orange { background: #f97316; }
+.dot.red { background: #ef4444; }
+.dot.cyan { background: #06b6d4; }
+
+.chart-container {
+  position: relative;
+  width: 100%;
+  height: 280px;
+}
+
+.chart-container.tall {
+  height: 320px;
+}
+
+/* Legend custom */
+.custom-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  justify-content: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.legend-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* Feature importance bars */
+.feature-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.feature-bar .name {
+  width: 120px;
+  font-size: 12px;
+  color: #cbd5e1;
+  text-align: right;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.feature-bar .bar-track {
+  flex: 1;
+  height: 24px;
+  background: #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.feature-bar .bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+}
+
+.feature-bar .bar-fill span {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.bar-positive { background: linear-gradient(90deg, #22c55e, #16a34a); }
+.bar-negative { background: linear-gradient(90deg, #ef4444, #dc2626); }
+
+/* Minute accuracy table */
+.minute-grid {
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  gap: 6px;
+}
+
+.minute-cell {
+  text-align: center;
+  padding: 12px 4px;
+  border-radius: 8px;
+  background: #1e293b;
+}
+
+.minute-cell .min-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.minute-cell .min-acc {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.minute-cell .min-conf {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+/* Footer */
+.footer {
+  text-align: center;
+  padding: 24px;
+  color: #475569;
+  font-size: 12px;
+  border-top: 1px solid #1e293b;
+  margin-top: 20px;
+}
+
